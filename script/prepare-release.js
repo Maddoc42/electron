@@ -79,7 +79,9 @@ async function getReleaseNotes (currentBranch) {
     head: currentBranch
   }
   let releaseNotes = ''
-  if (!args.automaticRelease) {
+  if (args.automaticRelease) {
+    releaseNotes = '## Bug Fixes \n\n'
+  } else {
     releaseNotes = '(placeholder)\n'
   }
   console.log(`Checking for commits from ${pkg.version} to ${currentBranch}`)
@@ -95,19 +97,44 @@ async function getReleaseNotes (currentBranch) {
       `${currentBranch}, skipping release.`)
     process.exit(0)
   }
+
+  let prCount = 0
   commitComparison.data.commits.forEach(commitEntry => {
     let commitMessage = commitEntry.commit.message
-    if (commitMessage.toLowerCase().indexOf('merge') > -1) {
-      let mergeRE = /Merge pull request (#\d+) from .*\n/
-      let prMatch = commitMessage.match(mergeRE)
-      commitMessage = commitMessage.replace(mergeRE, '').replace('\n', '')
-      if (commitMessage.substr(commitMessage.length - 1, commitMessage.length) !== '.') {
-        commitMessage += '.'
+    try {
+      if (commitMessage.toLowerCase().indexOf('#') > -1) {
+        let mergeRE = /Merge pull request #(\d+) from .*\n/
+        let prMatch = commitMessage.match(mergeRE)
+        let prNumber
+        if (prMatch) {
+          commitMessage = commitMessage.replace(mergeRE, '').replace('\n', '')
+          let newlineRE = /(.*)\n*.*/
+          let newlineMatch = commitMessage.match(newlineRE)
+          if (newlineMatch) {
+            commitMessage = newlineMatch[1]
+          }
+          prNumber = prMatch[1]
+        } else {
+          let prRE = /(.* )\(#(\d+)\)(?:.*)/
+          prMatch = commitMessage.match(prRE)
+          if (prMatch) {
+            commitMessage = prMatch[1].trim()
+            prNumber = prMatch[2]
+          }
+        }
+        if (prMatch) {
+          if (commitMessage.substr(commitMessage.length - 1, commitMessage.length) !== '.') {
+            commitMessage += '.'
+          }
+          releaseNotes += `* ${commitMessage} #${prNumber} \n\n`
+          prCount++
+        }
       }
-      releaseNotes += `${commitMessage} ${prMatch[1]} \n\n`
+    } catch (ex) {
+      console.log(`Ex: `, ex)
     }
   })
-  console.log(`${pass} Done generating release notes for ${currentBranch}.`)
+  console.log(`${pass} Done generating release notes for ${currentBranch}. Found ${prCount} PRs.`)
   return releaseNotes
 }
 
@@ -223,7 +250,7 @@ async function prepareRelease (isBeta, notesOnly) {
   let currentBranch = await getCurrentBranch(gitDir)
   if (notesOnly) {
     let releaseNotes = await getReleaseNotes(currentBranch)
-    console.log(`Draft release notes are: ${releaseNotes}`)
+    console.log(`Draft release notes are: \n${releaseNotes}`)
   } else {
     await verifyNewVersion()
     await createRelease(currentBranch, isBeta)
